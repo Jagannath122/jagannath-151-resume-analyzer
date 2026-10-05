@@ -1,0 +1,6 @@
+{
+  "name": "ResuPulse AI - Advanced Resume & CV PDF Analyzer",
+  "description": "Deep multimodal AI resume analyzer that examines PDF resumes to determine candidate DNA, multi-facility grading scores, benchmark pit analysis, and prompt-refined bullet point optimization.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
