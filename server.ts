@@ -9,7 +9,7 @@ dotenv.config({ path: ['.env.local', '.env'] });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
+export const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '50mb' }));
@@ -561,6 +561,17 @@ Your tasks:
   }
 });
 
+function serveBuiltApp() {
+  const distPath = path.resolve(__dirname, 'dist');
+
+  if (distPath) {
+    app.use(express.static(distPath));
+    app.get('*', (_req: Request, res: Response) => {
+      res.sendFile(path.resolve(distPath, 'index.html'));
+    });
+  }
+}
+
 // Vite or Static Serving
 async function setupServer() {
   if (process.env.NODE_ENV !== 'production') {
@@ -571,18 +582,14 @@ async function setupServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.resolve(__dirname, 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
-    });
+    serveBuiltApp();
   }
 
   const listen = (port: number): void => {
     const server = app.listen(port, '0.0.0.0', () => {
       const address = server.address();
       const activePort = typeof address === 'object' && address ? address.port : port;
-      console.log(`ResuPulse AI server running on port ${activePort}`);
+      console.log(`ResuPulse AI server running at http://localhost:${activePort}`);
     });
 
     server.on('error', (error: NodeJS.ErrnoException) => {
@@ -599,4 +606,8 @@ async function setupServer() {
   listen(PORT);
 }
 
-setupServer();
+if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') {
+  serveBuiltApp();
+} else {
+  setupServer();
+}
