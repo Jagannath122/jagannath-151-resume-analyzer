@@ -10,6 +10,7 @@ import { PdfViewerPanel } from './components/PdfViewerPanel';
 import { ExportReportModal } from './components/ExportReportModal';
 import { ResumeAnalysisResult } from './types/resume';
 import { generateSamplePdf, SAMPLE_RESUMES } from './utils/samplePdfs';
+import { analyzeResume, isGeminiConfigured } from './services/gemini';
 import {
   FileText,
   Layers,
@@ -40,23 +41,11 @@ export default function App() {
   const [isPdfViewerOpen, setIsPdfViewerOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [geminiConfigured, setGeminiConfigured] = useState<boolean | null>(null);
-  const [maxPdfBytes, setMaxPdfBytes] = useState(2.5 * 1024 * 1024);
-  const [isVercelDeployment, setIsVercelDeployment] = useState(false);
+  const [geminiConfigured, setGeminiConfigured] = useState<boolean>(() => isGeminiConfigured());
+  const maxPdfBytes = 25 * 1024 * 1024;
 
   useEffect(() => {
-    fetch('/api/health')
-      .then((response) => response.ok ? response.json() : null)
-      .then((health) => {
-        if (health) {
-          setGeminiConfigured(Boolean(health.geminiConfigured));
-          if (Number.isFinite(health.maxPdfBytes) && health.maxPdfBytes > 0) {
-            setMaxPdfBytes(health.maxPdfBytes);
-          }
-          setIsVercelDeployment(Boolean(health.isVercel));
-        }
-      })
-      .catch(() => setGeminiConfigured(null));
+    setGeminiConfigured(isGeminiConfigured());
   }, []);
 
   // File Upload handler
@@ -116,29 +105,19 @@ export default function App() {
     }
   };
 
-  // API Call to analyze PDF
+  // Call Gemini directly to analyze PDF
   const runAnalysis = async (base64: string, name: string, sizeKb: number) => {
     try {
       setStatusMessage('Gemini Multimodal Vision: Analyzing layout, typography & parsing text...');
-      const response = await fetch('/api/analyze-resume', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pdfBase64: base64,
-          targetRole,
-          targetJobDescription,
-          fileName: name,
-          fileSizeKb: sizeKb,
-        }),
+      const data = await analyzeResume({
+        pdfBase64: base64,
+        targetRole,
+        targetJobDescription,
+        fileName: name,
+        fileSizeKb: sizeKb,
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server responded with status ${response.status}`);
-      }
-
       setStatusMessage('Scoring facilities, benchmarking the pit & engineering prompt refinements...');
-      const data: ResumeAnalysisResult = await response.json();
       setAnalysis(data);
     } catch (err: any) {
       console.error('Analysis error:', err);
@@ -172,12 +151,10 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {geminiConfigured === false && (
+        {!geminiConfigured && (
           <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs sm:text-sm">
             <span className="font-bold">Gemini API key required:</span>{' '}
-            {isVercelDeployment
-              ? 'Add GEMINI_API_KEY to your Vercel project’s Production environment variables, then redeploy to enable resume analysis and AI refinement.'
-              : 'Add GEMINI_API_KEY to .env.local, then restart the server to enable resume analysis and AI refinement.'}
+            Add <code className="bg-amber-950/60 px-1.5 py-0.5 rounded font-mono text-amber-300">VITE_GEMINI_API_KEY</code> to your <code className="bg-amber-950/60 px-1.5 py-0.5 rounded font-mono text-amber-300">.env</code> or <code className="bg-amber-950/60 px-1.5 py-0.5 rounded font-mono text-amber-300">.env.local</code> file to enable resume analysis and AI refinement.
           </div>
         )}
 

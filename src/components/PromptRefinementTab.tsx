@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { WeakBulletPoint, PromptRefinementRecipe } from '../types/resume';
+import { refineBullet, refinePrompt } from '../services/gemini';
 import {
   Sparkles,
   Scissors,
@@ -65,19 +66,13 @@ export const PromptRefinementTab: React.FC<PromptRefinementTabProps> = ({
     setIsRefiningBullet(true);
     setApiError(null);
     try {
-      const response = await fetch('/api/refine-bullet', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          bullet: currentBullet.original,
-          targetRole: candidateRole,
-          style: 'custom',
-          customInstruction,
-        }),
+      const data = await refineBullet({
+        bullet: currentBullet.original,
+        targetRole: candidateRole,
+        style: 'custom',
+        customInstruction,
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
-      if (data.options) {
+      if (data?.options) {
         setCustomRewrites(data.options);
       }
     } catch (err) {
@@ -93,17 +88,11 @@ export const PromptRefinementTab: React.FC<PromptRefinementTabProps> = ({
     setIsRefiningPrompt(true);
     setApiError(null);
     try {
-      const response = await fetch('/api/refine-prompt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userPrompt: userDraftPrompt,
-          candidateRole,
-          sampleBullet: currentBullet?.original || 'Managed team and built software updates for web portal.',
-        }),
+      const data = await refinePrompt({
+        userPrompt: userDraftPrompt,
+        candidateRole,
+        sampleBullet: currentBullet?.original || 'Managed team and built software updates for web portal.',
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
       setRefinedPromptResult(data);
     } catch (err) {
       console.error('Failed to refine prompt:', err);

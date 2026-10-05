@@ -1,50 +1,32 @@
-import express, { Request, Response } from 'express';
-import dotenv from 'dotenv';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from '@google/genai';
+import { ResumeAnalysisResult } from '../types/resume';
 
-dotenv.config({ path: ['.env.local', '.env'] });
+const GEMINI_MODEL = (import.meta.env.VITE_GEMINI_MODEL as string) || 'gemini-2.5-flash';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+export function getGeminiApiKey(): string {
+  return (
+    (import.meta.env.VITE_GEMINI_API_KEY as string) ||
+    (import.meta.env.GEMINI_API_KEY as string) ||
+    ''
+  );
+}
 
-export const app = express();
-const PORT = Number(process.env.PORT) || 3000;
-const IS_VERCEL = process.env.VERCEL === '1';
-const MAX_PDF_BYTES = IS_VERCEL ? 2.5 * 1024 * 1024 : 25 * 1024 * 1024;
-const JSON_BODY_LIMIT = IS_VERCEL ? '4mb' : '50mb';
-
-app.use(express.json({ limit: JSON_BODY_LIMIT }));
-app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
-
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+export function isGeminiConfigured(): boolean {
+  return Boolean(getGeminiApiKey().trim());
+}
 
 function getGeminiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  const apiKey = getGeminiApiKey().trim();
   if (!apiKey) {
-    throw new Error('Gemini API key is not configured. Add GEMINI_API_KEY to .env.local and restart the server.');
+    throw new Error(
+      'Gemini API key is not configured. Please add VITE_GEMINI_API_KEY to your .env or .env.local file.'
+    );
   }
 
   return new GoogleGenAI({
     apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
   });
 }
-
-app.get('/api/health', (_req: Request, res: Response) => {
-  res.json({
-    ok: true,
-    geminiConfigured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
-    model: GEMINI_MODEL,
-    maxPdfBytes: MAX_PDF_BYTES,
-    isVercel: IS_VERCEL,
-  });
-});
 
 const RESUME_ANALYSIS_SCHEMA = {
   type: Type.OBJECT,
@@ -338,31 +320,29 @@ const RESUME_ANALYSIS_SCHEMA = {
   ],
 };
 
-// API: Analyze Resume directly from PDF
-app.post('/api/analyze-resume', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { pdfBase64, targetRole, targetJobDescription, fileName, fileSizeKb } = req.body;
+export async function analyzeResume(params: {
+  pdfBase64: string;
+  fileName?: string;
+  fileSizeKb?: number;
+  targetRole?: string;
+  targetJobDescription?: string;
+}): Promise<ResumeAnalysisResult> {
+  const { pdfBase64, targetRole, targetJobDescription, fileName, fileSizeKb } = params;
 
-    if (!pdfBase64) {
-      res.status(400).json({ error: 'Missing PDF base64 document payload' });
-      return;
-    }
+  if (!pdfBase64) {
+    throw new Error('Missing PDF document payload');
+  }
 
-    const cleanBase64 = pdfBase64.replace(/^data:application\/pdf;base64,/, '');
-    const pdfBytes = Buffer.from(cleanBase64, 'base64').byteLength;
-    if (pdfBytes > MAX_PDF_BYTES) {
-      res.status(413).json({
-        error: `PDF exceeds the ${IS_VERCEL ? '2.5 MB' : '25 MB'} upload limit.`,
-      });
-      return;
-    }
+  const cleanBase64 = pdfBase64.replace(/^data:application\/pdf;base64,/, '');
 
-    const targetRoleText = targetRole ? `Target Role to evaluate for: "${targetRole}".` : 'Target Role: Evaluate against candidate detected level and optimal industry standards.';
-    const targetJobText = targetJobDescription
-      ? `Specific Job Description to benchmark against: """${targetJobDescription}"""`
-      : 'Infer target role requirements from candidate title and top industry standards.';
+  const targetRoleText = targetRole
+    ? `Target Role to evaluate for: "${targetRole}".`
+    : 'Target Role: Evaluate against candidate detected level and optimal industry standards.';
+  const targetJobText = targetJobDescription
+    ? `Specific Job Description to benchmark against: """${targetJobDescription}"""`
+    : 'Infer target role requirements from candidate title and top industry standards.';
 
-    const systemPrompt = `You are an elite Chief Talent Officer, Principal ATS Systems Architect, and Executive Resume Strategist.
+  const systemPrompt = `You are an elite Chief Talent Officer, Principal ATS Systems Architect, and Executive Resume Strategist.
 You are given an actual PDF document of a resume / CV.
 You must analyze this resume ONLY from the provided PDF file, examining both the text content, visual typography, ATS parsability, section flow, bullet density, and candidate DNA.
 
@@ -408,56 +388,58 @@ Conduct a rigorous evaluation across:
 
 Return strictly valid JSON conforming to the schema.`;
 
-    const response = await getGeminiClient().models.generateContent({
-      model: GEMINI_MODEL,
-      contents: [
-        {
-          inlineData: {
-            mimeType: 'application/pdf',
-            data: cleanBase64,
-          },
+  const response = await getGeminiClient().models.generateContent({
+    model: GEMINI_MODEL,
+    contents: [
+      {
+        inlineData: {
+          mimeType: 'application/pdf',
+          data: cleanBase64,
         },
-        {
-          text: `Analyze this PDF resume thoroughly. ${targetRoleText} ${targetJobText}`,
-        },
-      ],
-      config: {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json',
-        responseSchema: RESUME_ANALYSIS_SCHEMA,
       },
-    });
+      {
+        text: `Analyze this PDF resume thoroughly. ${targetRoleText} ${targetJobText}`,
+      },
+    ],
+    config: {
+      systemInstruction: systemPrompt,
+      responseMimeType: 'application/json',
+      responseSchema: RESUME_ANALYSIS_SCHEMA,
+    },
+  });
 
-    const text = response.text;
-    if (!text) {
-      throw new Error('Empty response received from Gemini model');
-    }
-
-    const parsed = JSON.parse(text);
-    parsed.analyzedAt = new Date().toISOString();
-    parsed.pdfFileName = fileName || 'Uploaded_Resume.pdf';
-    parsed.pdfFileSizeKb = fileSizeKb || Math.round(cleanBase64.length * 0.75 / 1024);
-
-    res.json(parsed);
-  } catch (error: any) {
-    console.error('Error analyzing resume PDF:', error);
-    res.status(500).json({
-      error: error.message || 'Failed to analyze resume PDF',
-    });
+  const text = response.text;
+  if (!text) {
+    throw new Error('Empty response received from Gemini model');
   }
-});
 
-// API: Refine Bullet Point with specialized styles
-app.post('/api/refine-bullet', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { bullet, targetRole, style, customInstruction } = req.body;
+  const parsed = JSON.parse(text);
+  parsed.analyzedAt = new Date().toISOString();
+  parsed.pdfFileName = fileName || 'Uploaded_Resume.pdf';
+  parsed.pdfFileSizeKb = fileSizeKb || Math.round((cleanBase64.length * 0.75) / 1024);
 
-    if (!bullet) {
-      res.status(400).json({ error: 'Missing bullet text' });
-      return;
-    }
+  return parsed as ResumeAnalysisResult;
+}
 
-    const prompt = `You are an executive resume bullet optimizer.
+export async function refineBullet(params: {
+  bullet: string;
+  targetRole?: string;
+  style?: string;
+  customInstruction?: string;
+}): Promise<{
+  options: Array<{
+    title: string;
+    rewrittenText: string;
+    impactDelta: string;
+    explanation: string;
+  }>;
+}> {
+  const { bullet, targetRole, style, customInstruction } = params;
+  if (!bullet) {
+    throw new Error('Missing bullet text');
+  }
+
+  const prompt = `You are an executive resume bullet optimizer.
 Optimize the following resume bullet point for target role: "${targetRole || 'Software Engineering / Tech Professional'}".
 Original Bullet: "${bullet}"
 Requested Style: "${style || 'google-xyz'}"
@@ -470,52 +452,60 @@ Provide 3 distinct rewritten options:
 
 Also give a 1-sentence breakdown of why each is an improvement.`;
 
-    const response = await getGeminiClient().models.generateContent({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            options: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  title: { type: Type.STRING },
-                  rewrittenText: { type: Type.STRING },
-                  impactDelta: { type: Type.STRING },
-                  explanation: { type: Type.STRING },
-                },
-                required: ['title', 'rewrittenText', 'impactDelta', 'explanation'],
+  const response = await getGeminiClient().models.generateContent({
+    model: GEMINI_MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          options: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                rewrittenText: { type: Type.STRING },
+                impactDelta: { type: Type.STRING },
+                explanation: { type: Type.STRING },
               },
+              required: ['title', 'rewrittenText', 'impactDelta', 'explanation'],
             },
           },
-          required: ['options'],
         },
+        required: ['options'],
       },
-    });
+    },
+  });
 
-    const parsed = JSON.parse(response.text || '{}');
-    res.json(parsed);
-  } catch (error: any) {
-    console.error('Error refining bullet:', error);
-    res.status(500).json({ error: error.message || 'Failed to refine bullet' });
+  return JSON.parse(response.text || '{}');
+}
+
+export async function refinePrompt(params: {
+  userPrompt: string;
+  candidateRole?: string;
+  sampleBullet?: string;
+}): Promise<{
+  critique: string;
+  masterPrompt: string;
+  executionPreview: {
+    before: string;
+    after: string;
+    keyEnhancements: string[];
+  };
+  adjustableLevers: Array<{
+    leverName: string;
+    description: string;
+    sampleValue: string;
+  }>;
+}> {
+  const { userPrompt, candidateRole, sampleBullet } = params;
+  if (!userPrompt) {
+    throw new Error('Missing user prompt');
   }
-});
 
-// API: Prompt Refiner Studio (Turns vague prompt into Master Prompt and previews output)
-app.post('/api/refine-prompt', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const { userPrompt, candidateRole, sampleBullet } = req.body;
-
-    if (!userPrompt) {
-      res.status(400).json({ error: 'Missing user prompt' });
-      return;
-    }
-
-    const prompt = `You are a Principal Prompt Engineer specializing in AI Resume Optimization and Recruiter Persona Simulation.
+  const prompt = `You are a Principal Prompt Engineer specializing in AI Resume Optimization and Recruiter Persona Simulation.
 A job seeker wants to use AI to improve their resume, but provided this initial/rough prompt:
 "${userPrompt}"
 
@@ -528,96 +518,42 @@ Your tasks:
 3. Provide an "Execution Preview": Run this refined master prompt against the sample text to show the impressive real-world transformation.
 4. Provide 3 specific prompt levers/variables the user can tweak (e.g. Tone, Industry, Target Company Level).`;
 
-    const response = await getGeminiClient().models.generateContent({
-      model: GEMINI_MODEL,
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            critique: { type: Type.STRING },
-            masterPrompt: { type: Type.STRING },
-            executionPreview: {
+  const response = await getGeminiClient().models.generateContent({
+    model: GEMINI_MODEL,
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          critique: { type: Type.STRING },
+          masterPrompt: { type: Type.STRING },
+          executionPreview: {
+            type: Type.OBJECT,
+            properties: {
+              before: { type: Type.STRING },
+              after: { type: Type.STRING },
+              keyEnhancements: { type: Type.ARRAY, items: { type: Type.STRING } },
+            },
+            required: ['before', 'after', 'keyEnhancements'],
+          },
+          adjustableLevers: {
+            type: Type.ARRAY,
+            items: {
               type: Type.OBJECT,
               properties: {
-                before: { type: Type.STRING },
-                after: { type: Type.STRING },
-                keyEnhancements: { type: Type.ARRAY, items: { type: Type.STRING } },
+                leverName: { type: Type.STRING },
+                description: { type: Type.STRING },
+                sampleValue: { type: Type.STRING },
               },
-              required: ['before', 'after', 'keyEnhancements'],
-            },
-            adjustableLevers: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  leverName: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  sampleValue: { type: Type.STRING },
-                },
-                required: ['leverName', 'description', 'sampleValue'],
-              },
+              required: ['leverName', 'description', 'sampleValue'],
             },
           },
-          required: ['critique', 'masterPrompt', 'executionPreview', 'adjustableLevers'],
         },
+        required: ['critique', 'masterPrompt', 'executionPreview', 'adjustableLevers'],
       },
-    });
+    },
+  });
 
-    const parsed = JSON.parse(response.text || '{}');
-    res.json(parsed);
-  } catch (error: any) {
-    console.error('Error refining prompt:', error);
-    res.status(500).json({ error: error.message || 'Failed to refine prompt' });
-  }
-});
-
-function serveBuiltApp() {
-  const distPath = path.resolve(__dirname, 'dist');
-
-  if (distPath) {
-    app.use(express.static(distPath));
-    app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
-    });
-  }
-}
-
-// Vite or Static Serving
-async function setupServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    serveBuiltApp();
-  }
-
-  const listen = (port: number): void => {
-    const server = app.listen(port, '0.0.0.0', () => {
-      const address = server.address();
-      const activePort = typeof address === 'object' && address ? address.port : port;
-      console.log(`ResuPulse AI server running at http://localhost:${activePort}`);
-    });
-
-    server.on('error', (error: NodeJS.ErrnoException) => {
-      if (error.code === 'EADDRINUSE') {
-        console.warn(`Port ${port} is already in use; trying ${port + 1}`);
-        listen(port + 1);
-        return;
-      }
-
-      throw error;
-    });
-  };
-
-  listen(PORT);
-}
-
-if (!IS_VERCEL) {
-  setupServer();
+  return JSON.parse(response.text || '{}');
 }
