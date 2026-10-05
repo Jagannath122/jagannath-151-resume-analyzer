@@ -27,6 +27,10 @@ export default function App() {
   const [analysis, setAnalysis] = useState<ResumeAnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
+  const [thoughtSnippet, setThoughtSnippet] = useState('');
+  const [analysisStage, setAnalysisStage] = useState<
+    'idle' | 'uploading' | 'thinking' | 'generating' | 'finalizing'
+  >('idle');
   const [pdfBase64, setPdfBase64] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
   const [fileSizeKb, setFileSizeKb] = useState<number>(0);
@@ -105,19 +109,30 @@ export default function App() {
     }
   };
 
-  // Call Gemini directly to analyze PDF
+  // Call Gemini directly to analyze PDF with live streaming progress
   const runAnalysis = async (base64: string, name: string, sizeKb: number) => {
     try {
-      setStatusMessage('Gemini Multimodal Vision: Analyzing layout, typography & parsing text...');
+      setAnalysisStage('thinking');
+      setStatusMessage('Connecting to Gemini Vision stream & initializing reasoning...');
+      setThoughtSnippet('');
+
       const data = await analyzeResume({
         pdfBase64: base64,
         targetRole,
         targetJobDescription,
         fileName: name,
         fileSizeKb: sizeKb,
+        onProgress: (prog) => {
+          setStatusMessage(prog.status);
+          if (prog.thoughtSnippet) {
+            setThoughtSnippet(prog.thoughtSnippet);
+          }
+          if (prog.stage) {
+            setAnalysisStage(prog.stage);
+          }
+        },
       });
 
-      setStatusMessage('Scoring facilities, benchmarking the pit & engineering prompt refinements...');
       setAnalysis(data);
     } catch (err: any) {
       console.error('Analysis error:', err);
@@ -125,6 +140,8 @@ export default function App() {
     } finally {
       setIsAnalyzing(false);
       setStatusMessage('');
+      setThoughtSnippet('');
+      setAnalysisStage('idle');
     }
   };
 
@@ -185,6 +202,8 @@ export default function App() {
             setTargetJobDescription={setTargetJobDescription}
             isAnalyzing={isAnalyzing}
             statusMessage={statusMessage}
+            thoughtSnippet={thoughtSnippet}
+            analysisStage={analysisStage}
           />
         )}
 

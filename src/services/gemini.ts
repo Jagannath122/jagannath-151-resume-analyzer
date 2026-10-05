@@ -320,20 +320,33 @@ const RESUME_ANALYSIS_SCHEMA = {
   ],
 };
 
+export interface AnalysisProgress {
+  stage: 'uploading' | 'thinking' | 'generating' | 'finalizing';
+  status: string;
+  thoughtSnippet?: string;
+  bytesReceived?: number;
+}
+
 export async function analyzeResume(params: {
   pdfBase64: string;
   fileName?: string;
   fileSizeKb?: number;
   targetRole?: string;
   targetJobDescription?: string;
+  onProgress?: (progress: AnalysisProgress) => void;
 }): Promise<ResumeAnalysisResult> {
-  const { pdfBase64, targetRole, targetJobDescription, fileName, fileSizeKb } = params;
+  const { pdfBase64, targetRole, targetJobDescription, fileName, fileSizeKb, onProgress } = params;
 
   if (!pdfBase64) {
     throw new Error('Missing PDF document payload');
   }
 
   const cleanBase64 = pdfBase64.replace(/^data:application\/pdf;base64,/, '');
+
+  onProgress?.({
+    stage: 'thinking',
+    status: 'Connecting to Gemini Vision stream & initializing reasoning...',
+  });
 
   const targetRoleText = targetRole
     ? `Target Role to evaluate for: "${targetRole}".`
@@ -388,7 +401,7 @@ Conduct a rigorous evaluation across:
 
 Return strictly valid JSON conforming to the schema.`;
 
-  const response = await getGeminiClient().models.generateContent({
+  const stream = await getGeminiClient().models.generateContentStream({
     model: GEMINI_MODEL,
     contents: [
       {
@@ -405,15 +418,58 @@ Return strictly valid JSON conforming to the schema.`;
       systemInstruction: systemPrompt,
       responseMimeType: 'application/json',
       responseSchema: RESUME_ANALYSIS_SCHEMA,
+      thinkingConfig: {
+        includeThoughts: true,
+      },
     },
   });
 
-  const text = response.text;
-  if (!text) {
+  let fullJsonText = '';
+
+  for await (const chunk of stream) {
+    const candidate = chunk.candidates?.[0];
+    const parts = candidate?.content?.parts || [];
+
+    for (const part of parts) {
+      if ((part as any).thought) {
+        const thoughtText = (part.text || '').trim();
+        if (thoughtText) {
+          onProgress?.({
+            stage: 'thinking',
+            status: 'AI Deep Thinking & Multimodal Reasoning...',
+            thoughtSnippet: thoughtText.slice(-200),
+          });
+        }
+      } else if (part.text) {
+        fullJsonText += part.text;
+        onProgress?.({
+          stage: 'generating',
+          status: `Synthesizing facility scores & benchmark audit (${(fullJsonText.length / 1024).toFixed(1)} KB)...`,
+          bytesReceived: fullJsonText.length,
+        });
+      }
+    }
+
+    if (!parts.length && chunk.text) {
+      fullJsonText += chunk.text;
+      onProgress?.({
+        stage: 'generating',
+        status: `Receiving structured analysis (${(fullJsonText.length / 1024).toFixed(1)} KB)...`,
+        bytesReceived: fullJsonText.length,
+      });
+    }
+  }
+
+  onProgress?.({
+    stage: 'finalizing',
+    status: 'Finalizing facility scores & preparing dashboard...',
+  });
+
+  if (!fullJsonText.trim()) {
     throw new Error('Empty response received from Gemini model');
   }
 
-  const parsed = JSON.parse(text);
+  const parsed = JSON.parse(fullJsonText);
   parsed.analyzedAt = new Date().toISOString();
   parsed.pdfFileName = fileName || 'Uploaded_Resume.pdf';
   parsed.pdfFileSizeKb = fileSizeKb || Math.round((cleanBase64.length * 0.75) / 1024);

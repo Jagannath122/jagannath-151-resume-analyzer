@@ -23,6 +23,8 @@ interface UploadHeroProps {
   setTargetJobDescription: (val: string) => void;
   isAnalyzing: boolean;
   statusMessage?: string;
+  thoughtSnippet?: string;
+  analysisStage?: string;
 }
 
 export const UploadHero: React.FC<UploadHeroProps> = ({
@@ -34,6 +36,8 @@ export const UploadHero: React.FC<UploadHeroProps> = ({
   setTargetJobDescription,
   isAnalyzing,
   statusMessage,
+  thoughtSnippet,
+  analysisStage,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [showJobTargeting, setShowJobTargeting] = useState(false);
@@ -122,12 +126,40 @@ export const UploadHero: React.FC<UploadHeroProps> = ({
             </div>
 
             {isAnalyzing ? (
-              <div className="space-y-2">
-                <p className="text-base font-semibold text-white animate-pulse">
-                  {statusMessage || 'Reading & Scoring PDF Resume with Gemini Vision...'}
+              <div className="space-y-4 max-w-lg w-full">
+                <div className="flex items-center justify-center space-x-2">
+                  <span className="relative flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                  </span>
+                  <span className="text-xs uppercase tracking-wider font-bold text-indigo-400">
+                    {analysisStage === 'thinking' ? 'Deep AI Reasoning Stream' : 'Live Data Stream'}
+                  </span>
+                </div>
+
+                <p className="text-base font-semibold text-white">
+                  {statusMessage || 'Analyzing PDF with Gemini Vision...'}
                 </p>
-                <p className="text-xs text-slate-400">
-                  Scrutinizing layout, parsing ATS signals, computing facility grades, and benchmarking the pit...
+
+                {/* Live Thought Stream Preview Box */}
+                {thoughtSnippet && (
+                  <div className="p-3.5 rounded-xl bg-slate-900/90 border border-indigo-500/30 text-left shadow-lg">
+                    <div className="flex items-center space-x-2 text-[11px] font-semibold text-indigo-300 mb-1">
+                      <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-pulse" />
+                      <span>Live AI Model Thoughts:</span>
+                    </div>
+                    <p className="text-xs font-mono text-slate-300 leading-relaxed italic line-clamp-3">
+                      "{thoughtSnippet}"<span className="inline-block w-1.5 h-3 bg-indigo-400 ml-1 animate-pulse" />
+                    </p>
+                  </div>
+                )}
+
+                <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                  <div className="bg-gradient-to-r from-indigo-500 via-violet-500 to-emerald-400 h-1.5 rounded-full animate-pulse w-full"></div>
+                </div>
+
+                <p className="text-[11px] text-slate-400">
+                  Multimodal stream active. The AI is reasoning deeply across ATS rules, metrics, and benchmarks.
                 </p>
               </div>
             ) : (
