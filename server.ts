@@ -11,9 +11,12 @@ const __dirname = path.dirname(__filename);
 
 export const app = express();
 const PORT = Number(process.env.PORT) || 3000;
+const IS_VERCEL = process.env.VERCEL === '1';
+const MAX_PDF_BYTES = IS_VERCEL ? 2.5 * 1024 * 1024 : 25 * 1024 * 1024;
+const JSON_BODY_LIMIT = IS_VERCEL ? '4mb' : '50mb';
 
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
+app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
 const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
@@ -38,6 +41,8 @@ app.get('/api/health', (_req: Request, res: Response) => {
     ok: true,
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
     model: GEMINI_MODEL,
+    maxPdfBytes: MAX_PDF_BYTES,
+    isVercel: IS_VERCEL,
   });
 });
 
@@ -344,6 +349,13 @@ app.post('/api/analyze-resume', async (req: Request, res: Response): Promise<voi
     }
 
     const cleanBase64 = pdfBase64.replace(/^data:application\/pdf;base64,/, '');
+    const pdfBytes = Buffer.from(cleanBase64, 'base64').byteLength;
+    if (pdfBytes > MAX_PDF_BYTES) {
+      res.status(413).json({
+        error: `PDF exceeds the ${IS_VERCEL ? '2.5 MB' : '25 MB'} upload limit.`,
+      });
+      return;
+    }
 
     const targetRoleText = targetRole ? `Target Role to evaluate for: "${targetRole}".` : 'Target Role: Evaluate against candidate detected level and optimal industry standards.';
     const targetJobText = targetJobDescription
@@ -606,8 +618,6 @@ async function setupServer() {
   listen(PORT);
 }
 
-if (process.env.VERCEL === '1' || process.env.NODE_ENV === 'production') {
-  serveBuiltApp();
-} else {
+if (!IS_VERCEL) {
   setupServer();
 }

@@ -41,12 +41,20 @@ export default function App() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [geminiConfigured, setGeminiConfigured] = useState<boolean | null>(null);
+  const [maxPdfBytes, setMaxPdfBytes] = useState(2.5 * 1024 * 1024);
+  const [isVercelDeployment, setIsVercelDeployment] = useState(false);
 
   useEffect(() => {
     fetch('/api/health')
       .then((response) => response.ok ? response.json() : null)
       .then((health) => {
-        if (health) setGeminiConfigured(Boolean(health.geminiConfigured));
+        if (health) {
+          setGeminiConfigured(Boolean(health.geminiConfigured));
+          if (Number.isFinite(health.maxPdfBytes) && health.maxPdfBytes > 0) {
+            setMaxPdfBytes(health.maxPdfBytes);
+          }
+          setIsVercelDeployment(Boolean(health.isVercel));
+        }
       })
       .catch(() => setGeminiConfigured(null));
   }, []);
@@ -57,8 +65,9 @@ export default function App() {
       setErrorMessage('Please upload a PDF document (.pdf).');
       return;
     }
-    if (file.size > 25 * 1024 * 1024) {
-      setErrorMessage('The PDF exceeds the 25 MB upload limit. Please choose a smaller file.');
+    if (file.size > maxPdfBytes) {
+      const maxSizeMb = (maxPdfBytes / (1024 * 1024)).toFixed(1);
+      setErrorMessage(`This PDF exceeds the ${maxSizeMb} MB upload limit. Please choose a smaller file.`);
       return;
     }
 
@@ -165,7 +174,10 @@ export default function App() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {geminiConfigured === false && (
           <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs sm:text-sm">
-            <span className="font-bold">Gemini API key required:</span> Add a rotated key as GEMINI_API_KEY in .env.local, then restart the server to enable resume analysis and AI refinement.
+            <span className="font-bold">Gemini API key required:</span>{' '}
+            {isVercelDeployment
+              ? 'Add GEMINI_API_KEY to your Vercel project’s Production environment variables, then redeploy to enable resume analysis and AI refinement.'
+              : 'Add GEMINI_API_KEY to .env.local, then restart the server to enable resume analysis and AI refinement.'}
           </div>
         )}
 
