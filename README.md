@@ -1,28 +1,42 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# ResuPulse AI - Multimodal Resume Analyzer
 
-# Run and deploy your AI Studio app
+A pure client-side React + Vite web application for AI-powered resume analysis, facility grading, benchmark pit comparison, bullet point optimization, and career strategy.
 
-This contains everything you need to run your app locally.
-
-View your app in AI Studio: https://ai.studio/apps/aea9b032-f9d0-46e0-83a9-66f84fdc2553
+All AI features run directly in the frontend using the `@google/genai` SDK—no separate backend server or serverless proxy needed!
 
 ## Run Locally
 
-**Prerequisites:**  Node.js
-
+**Prerequisites:** Node.js (v18+)
 
 1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+   ```bash
+   npm install
+   ```
 
-## Deploy to Vercel
+2. Configure your Gemini API key in `.env.local` or `.env`:
+   ```bash
+   VITE_GEMINI_API_KEY="your-gemini-api-key"
+   ```
+   *(Note: `GEMINI_API_KEY` is also supported)*
 
-1. Import this repository into Vercel with the project root as the Root Directory.
-2. Add `GEMINI_API_KEY` under **Settings → Environment Variables** and select **Production** (and **Preview** if needed). Do not commit `.env.local`.
-3. Deploy. Vercel uses `vercel.json` to build the Vite frontend and expose the API from the same deployment and domain.
+3. Run the development server (only 1 single dev server needed):
+   ```bash
+   npm run dev
+   ```
 
-Resume uploads on Vercel are limited to 2.5 MB because serverless functions have a request-body size limit. Local development supports PDFs up to 25 MB.
+4. Open the displayed URL (e.g. `http://localhost:3000` or `http://localhost:5173`) in your browser.
+
+## Build and Preview
+
+```bash
+npm run build
+npm run preview
+```
+
+## Deploy to Vercel / Netlify / GitHub Pages
+
+Because this application runs 100% in the frontend, you can deploy it as a static website to any hosting provider (Vercel, Netlify, Cloudflare Pages, GitHub Pages):
+
+1. Set `VITE_GEMINI_API_KEY` in your hosting provider's Environment Variables settings.
+2. Build command: `npm run build`
+3. Output directory: `dist`
